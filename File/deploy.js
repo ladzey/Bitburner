@@ -22,6 +22,7 @@ export async function main(ns) {
     
     // Toggle for excluding private servers.
     // If set to true, any server whose name starts with "pserv-" will be skipped.
+    // Default: false
     const excludePrivateToggle = ns.args.length > 1 
                                    ? (ns.args[1] === true || ns.args[1] === "true")
                                    : false;
@@ -37,7 +38,7 @@ export async function main(ns) {
 
     ns.tprint(`Deploying scripts: ${scriptsToDeploy.join(", ")}`);
     ns.tprint(`Maximum hop level: ${targetHop}`);
-    ns.tprint(`Exclude private servers: ${excludePrivateToggle}`);
+    ns.tprint(`Exclude private servers toggle: ${excludePrivateToggle}`);
 
     // Scan all servers up to targetHop from "home"
     const scannedServers = getServersUpToLevel(ns, targetHop);
@@ -62,7 +63,7 @@ export async function main(ns) {
     ns.tprint(`Private servers excluded: ${privateExcluded.length ? privateExcluded.join(", ") : "None"}`);
     ns.tprint("============================================================");
 
-    // Build an array of valid servers that can be nuked and an array of those that are skipped due to insufficient port openers.
+    // Build arrays for valid servers and those skipped due to insufficient port openers.
     let validServers = [];
     let portExcludedServers = [];
     for (const server of candidateServers) {
@@ -73,6 +74,11 @@ export async function main(ns) {
         }
         validServers.push(server);
     }
+    
+    // Print a summary of the skipped servers (due to insufficient port openers).
+    ns.tprint("============================================================");
+    ns.tprint(`Servers skipped due to insufficient port openers: ${portExcludedServers.length ? portExcludedServers.join(", ") : "None"}`);
+    ns.tprint("============================================================");
     
     // (Optional) Separate valid servers based on port requirements (for logging)
     const serversNoPorts = [];
