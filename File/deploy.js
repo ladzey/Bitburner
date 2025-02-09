@@ -4,22 +4,37 @@
 export async function main(ns) {
     // List of files (scripts) you want to deploy.
     const scriptsToDeploy = ["early-hack-template.js"];
-
+    
     // Servers to exclude from deployment.
     const excludedServers = ["home"];
 
-    // Get a list of all servers and exclude the specified ones.
-    let allServers = getAllServers(ns).filter(server => !excludedServers.includes(server));
+    // Specify the maximum hop/level from "home" to process.
+    const targetHop = 3; // This will include servers 1 and 2 hops away.
+
+    // Get a list of all servers up to the specified hop level.
+    let servers = getServersUpToLevel(ns, targetHop);
+    // Exclude any servers you don't want.
+    servers = servers.filter(server => !excludedServers.includes(server));
+
+    // Build an array of servers that we can nuke (i.e. have enough port openers).
+    let validServers = [];
+    for (const server of servers) {
+        if (!canNuke(ns, server)) {
+            ns.tprint(`Skipping server ${server} because not enough port openers are available to nuke it.`);
+            continue;
+        }
+        validServers.push(server);
+    }
 
     // Copy the scripts to every valid server.
-    for (const server of allServers) {
+    for (const server of validServers) {
         await ns.scp(scriptsToDeploy, server);
     }
 
-    // Separate servers based on the number of ports required.
+    // Separate valid servers based on the number of ports required.
     const serversNoPorts = [];
     const serversWithPorts = [];
-    for (const server of allServers) {
+    for (const server of validServers) {
         const portsRequired = ns.getServerNumPortsRequired(server);
         if (portsRequired === 0) {
             serversNoPorts.push(server);
@@ -28,8 +43,8 @@ export async function main(ns) {
         }
     }
 
-    ns.tprint(`Servers requiring no ports: ${serversNoPorts}`);
-    ns.tprint(`Servers requiring ports: ${serversWithPorts}`);
+    ns.tprint(`Valid servers (up to hop ${targetHop}) requiring no ports: ${serversNoPorts}`);
+    ns.tprint(`Valid servers (up to hop ${targetHop}) requiring ports: ${serversWithPorts}`);
 
     // Process servers that require NO ports to be opened.
     for (const server of serversNoPorts) {
@@ -43,26 +58,59 @@ export async function main(ns) {
 }
 
 /**
- * Recursively scans your network and returns an array of all server hostnames.
- * @param {NS} ns 
- * @param {string} host - The current host to scan from (defaults to "home").
- * @param {Set<string>} visited - A Set to track visited servers.
- * @returns {string[]} An array of all server hostnames.
+ * Returns all servers that are within the specified hop/level from "home" using a breadth-first search.
+ * This function collects all servers with a level greater than 0 and less than or equal to maxHop.
+ *
+ * @param {NS} ns
+ * @param {number} maxHop - The maximum hop level (distance) from "home".
+ * @returns {string[]} An array of server hostnames within that hop range.
  */
-function getAllServers(ns, host = "home", visited = new Set()) {
-    visited.add(host);
-    const neighbors = ns.scan(host);
-    for (const neighbor of neighbors) {
-        if (!visited.has(neighbor)) {
-            getAllServers(ns, neighbor, visited);
+function getServersUpToLevel(ns, maxHop) {
+    const visited = new Set();
+    const queue = [{ server: "home", level: 0 }];
+    const result = [];
+    
+    visited.add("home");
+    while (queue.length > 0) {
+        const { server, level } = queue.shift();
+        // Exclude "home" (level 0) and include only servers within our hop range.
+        if (level > 0 && level <= maxHop) {
+            result.push(server);
+        }
+        if (level < maxHop) {
+            for (const neighbor of ns.scan(server)) {
+                if (!visited.has(neighbor)) {
+                    visited.add(neighbor);
+                    queue.push({ server: neighbor, level: level + 1 });
+                }
+            }
         }
     }
-    return Array.from(visited);
+    return result;
+}
+
+/**
+ * Checks if there are enough port openers available on "home" to nuke the specified server.
+ *
+ * @param {NS} ns 
+ * @param {string} server - The server to check.
+ * @returns {boolean} True if enough port openers are available; otherwise, false.
+ */
+function canNuke(ns, server) {
+    let portsOpened = 0;
+    if (ns.fileExists("BruteSSH.exe", "home")) portsOpened++;
+    if (ns.fileExists("FTPCrack.exe", "home")) portsOpened++;
+    if (ns.fileExists("relaySMTP.exe", "home")) portsOpened++;
+    if (ns.fileExists("HTTPWorm.exe", "home")) portsOpened++;
+    if (ns.fileExists("SQLInject.exe", "home")) portsOpened++;
+    const requiredPorts = ns.getServerNumPortsRequired(server);
+    return (portsOpened >= requiredPorts);
 }
 
 /**
  * Attempts to gain root access to a server and executes each script from scriptsToDeploy with the appropriate thread count.
- * This updated version first checks if you have enough port openers before calling ns.nuke().
+ * This version first opens ports (if needed) and nukes the server.
+ *
  * @param {NS} ns
  * @param {string} server
  * @param {string[]} scriptsToDeploy
@@ -113,13 +161,13 @@ function gainRootAccess(ns, server, scriptsToDeploy) {
 }
 
 /**
- * Opens ports on a server using available hacking tools.
+ * (Optional) Opens ports on a server using available hacking tools.
+ * This function is kept here if you want to separate port opening logic later.
+ *
  * @param {NS} ns
  * @param {string} server
  */
 function openPorts(ns, server) {
-    // This function is now incorporated into gainRootAccess.
-    // It is kept here if you want to separate port opening logic later.
     if (ns.fileExists("BruteSSH.exe", "home")) {
         ns.brutessh(server);
     }
@@ -143,8 +191,8 @@ function openPorts(ns, server) {
  * - Exactly 16GB: 6 threads
  * - Exactly 32GB: 12 threads
  * - Otherwise: uses available RAM divided by the script's RAM usage.
- * 
- * @param {NS} ns 
+ *
+ * @param {NS} ns
  * @param {string} server - The server hostname.
  * @param {string} script - The script filename.
  * @returns {number} The number of threads to use.
