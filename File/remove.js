@@ -1,8 +1,8 @@
 /** 
  * This script stops and removes specific scripts from servers within a specified hop range.
  *
- * Usage: run removeSpecificScripts.js [maxHop] [excludePrivate]
- * Example: run removeSpecificScripts.js 2 true
+ * Usage: run remove.js [maxHop] [excludePrivate]
+ * Example: run remove.js 2 true
  *
  * It will:
  *   1. Retrieve all servers within a specified number of hops from "home".
