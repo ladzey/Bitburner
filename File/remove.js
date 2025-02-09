@@ -1,34 +1,49 @@
 /** 
  * This script stops and removes specific scripts from servers within a specified hop range.
  *
- * Usage: run removeSpecificScripts.js
+ * Usage: run removeSpecificScripts.js [maxHop] [excludePrivate]
+ * Example: run removeSpecificScripts.js 2 true
  *
  * It will:
  *   1. Retrieve all servers within a specified number of hops from "home".
- *   2. Skip any server specified in the `excludedServers` array.
- *   3. For each remaining server, check if any file matches one of the target scripts.
- *   4. Attempt to kill the script if it's running on that server.
- *   5. Remove the file from the server.
+ *   2. Optionally exclude private servers.
+ *   3. Skip any server specified in the `excludedServers` array.
+ *   4. For each remaining server, check if any file matches one of the target scripts.
+ *   5. Attempt to kill the script if it's running on that server.
+ *   6. Remove the file from the server.
  *
  * @param {NS} ns
  */
 export async function main(ns) {
     // List of specific scripts you want to remove.
-    const scriptsToRemove = ["early-hack-template.js"];
+    const scriptsToRemove = ["earlyhack.js"];
 
     // List of servers to exclude from processing.
-    const excludedServers = ["home"];
+    const excludedServers = [];
 
-    // Set the maximum hop level (distance from "home") to process.
-    // For example, targetHop = 2 will process servers 1 or 2 hops away from "home".
-    const targetHop = 3;
+    // Get the maximum hop level (distance from "home") from the script arguments.
+    // Default: 1
+    const targetHop = ns.args[0] !== undefined ? ns.args[0] : 1;
+
+    // Get the excludePrivate flag from the script arguments.
+    // Default: false
+    const excludePrivate = ns.args[1] !== undefined ? ns.args[1] : false;
 
     // Retrieve all servers within the target hop range.
-    let servers = getServersUpToLevel(ns, targetHop);
+    let servers = getServersUpToLevel(ns, targetHop, excludePrivate);
+    
     // Exclude any servers in the excludedServers list.
+    const manuallyExcluded = servers.filter(server => excludedServers.includes(server));
     servers = servers.filter(server => !excludedServers.includes(server));
     
+    // Print a summary of the processed servers 
+    ns.tprint("============================================================");
     ns.tprint(`Processing servers within ${targetHop} hops: ${servers}`);
+    
+    // Print a summary of the excluded servers.
+    ns.tprint("============================================================");
+    ns.tprint(`Manually excluded servers: ${manuallyExcluded.length ? manuallyExcluded.join(", ") : "None"}`);
+    ns.tprint("============================================================");
 
     // Process each server.
     for (const server of servers) {
@@ -58,9 +73,10 @@ export async function main(ns) {
  *
  * @param {NS} ns
  * @param {number} maxHop - The maximum hop level (distance from "home") to include.
+ * @param {boolean} excludePrivate - Whether to exclude private servers.
  * @returns {string[]} An array of server hostnames within the specified hop range.
  */
-function getServersUpToLevel(ns, maxHop) {
+function getServersUpToLevel(ns, maxHop, excludePrivate) {
     const visited = new Set();
     const queue = [{ server: "home", level: 0 }];
     const result = [];
@@ -70,6 +86,7 @@ function getServersUpToLevel(ns, maxHop) {
         const { server, level } = queue.shift();
         // Only add servers that are at least 1 hop away and within maxHop.
         if (level > 0 && level <= maxHop) {
+            if (excludePrivate && server.startsWith("pserv")) continue;
             result.push(server);
         }
         // Continue the search if we haven't reached the maximum hop level.
