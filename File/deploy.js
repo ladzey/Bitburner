@@ -2,36 +2,58 @@
  * @param {NS} ns 
  */
 export async function main(ns) {
-    // List of files (scripts) you want to deploy.
-    const scriptsToDeploy = ["early-hack-template.js"];
+    // ====== CONFIGURATION ======
+    const scriptsToDeploy = ["earlyhack.js"];
+    // Manually excluded servers (these will never be processed)
+    const manualExcludedServers = [];
+    // Toggle to exclude private servers (pserv-0 to pserv-24)
+    const excludePrivateToggle = false;
+    // Build the full manual exclusion list:
+    let excludedServers = [...manualExcludedServers];
+    if (excludePrivateToggle) {
+        excludedServers.push(...generatePrivateServerList());
+    }
+    // ============================
     
-    // Servers to exclude from deployment.
-    const excludedServers = ["home"];
-
-    // Specify the maximum hop/level from "home" to process.
-    const targetHop = 3; // This will include servers 1 and 2 hops away.
-
-    // Get a list of all servers up to the specified hop level.
-    let servers = getServersUpToLevel(ns, targetHop);
-    // Exclude any servers you don't want.
-    servers = servers.filter(server => !excludedServers.includes(server));
-
-    // Build an array of servers that we can nuke (i.e. have enough port openers).
+    // Get the maximum hop level from the terminal argument (default: 1)
+    const targetHop = ns.args.length > 0 ? Number(ns.args[0]) : 1;
+    if (isNaN(targetHop) || targetHop <= 0) {
+        ns.tprint("ERROR: Invalid hop count. Please enter a positive number.");
+        return;
+    }
+    
+    // Scan all servers up to targetHop from "home"
+    const scannedServers = getServersUpToLevel(ns, targetHop);
+    
+    // Compute the servers that are manually excluded
+    const manuallyExcluded = scannedServers.filter(server => excludedServers.includes(server));
+    // Compute candidate servers (those not manually excluded)
+    const candidateServers = scannedServers.filter(server => !excludedServers.includes(server));
+    
+    // Build an array of valid servers that can be nuked and an array of those that are skipped due to insufficient ports.
     let validServers = [];
-    for (const server of servers) {
+    let portExcludedServers = [];
+    for (const server of candidateServers) {
         if (!canNuke(ns, server)) {
             ns.tprint(`Skipping server ${server} because not enough port openers are available to nuke it.`);
+            portExcludedServers.push(server);
             continue;
         }
         validServers.push(server);
     }
-
-    // Copy the scripts to every valid server.
+    
+    // Print a summary of the excluded servers.
+    ns.tprint("============================================================");
+    ns.tprint(`Manually excluded servers: ${manuallyExcluded.length ? manuallyExcluded.join(", ") : "None"}`);
+    ns.tprint(`Servers skipped due to insufficient port openers: ${portExcludedServers.length ? portExcludedServers.join(", ") : "None"}`);
+    ns.tprint("============================================================");
+    
+    // Proceed with valid servers: copy scripts, then gain root and deploy.
     for (const server of validServers) {
         await ns.scp(scriptsToDeploy, server);
     }
-
-    // Separate valid servers based on the number of ports required.
+    
+    // (Optional) Separate valid servers based on port requirements (for logging)
     const serversNoPorts = [];
     const serversWithPorts = [];
     for (const server of validServers) {
@@ -42,28 +64,22 @@ export async function main(ns) {
             serversWithPorts.push(server);
         }
     }
-
-    ns.tprint(`Valid servers (up to hop ${targetHop}) requiring no ports: ${serversNoPorts}`);
-    ns.tprint(`Valid servers (up to hop ${targetHop}) requiring ports: ${serversWithPorts}`);
-
-    // Process servers that require NO ports to be opened.
-    for (const server of serversNoPorts) {
-        gainRootAccess(ns, server, scriptsToDeploy);
-    }
-
-    // Process servers that require ports to be opened.
-    for (const server of serversWithPorts) {
+    ns.tprint(`Valid servers (up to ${targetHop} hops) requiring no ports: ${serversNoPorts.join(", ")}`);
+    ns.tprint(`Valid servers (up to ${targetHop} hops) requiring ports: ${serversWithPorts.join(", ")}`);
+    
+    // Deploy scripts on valid servers.
+    for (const server of validServers) {
         gainRootAccess(ns, server, scriptsToDeploy);
     }
 }
 
 /**
- * Returns all servers that are within the specified hop/level from "home" using a breadth-first search.
- * This function collects all servers with a level greater than 0 and less than or equal to maxHop.
+ * Returns all servers that are within the specified hop level from "home" using a breadth-first search.
+ * Only servers with level > 0 and ≤ maxHop are returned.
  *
  * @param {NS} ns
- * @param {number} maxHop - The maximum hop level (distance) from "home".
- * @returns {string[]} An array of server hostnames within that hop range.
+ * @param {number} maxHop - The maximum hop distance from "home".
+ * @returns {string[]} Array of server hostnames.
  */
 function getServersUpToLevel(ns, maxHop) {
     const visited = new Set();
@@ -73,7 +89,6 @@ function getServersUpToLevel(ns, maxHop) {
     visited.add("home");
     while (queue.length > 0) {
         const { server, level } = queue.shift();
-        // Exclude "home" (level 0) and include only servers within our hop range.
         if (level > 0 && level <= maxHop) {
             result.push(server);
         }
@@ -90,13 +105,34 @@ function getServersUpToLevel(ns, maxHop) {
 }
 
 /**
- * Checks if there are enough port openers available on "home" to nuke the specified server.
+ * Generates a list of private server names from pserv-0 to pserv-24.
+ *
+ * @returns {string[]} Array of private server names.
+ */
+function generatePrivateServerList() {
+    let privateServers = [];
+    for (let i = 0; i <= 24; i++) { // Change the number 24 to whatever you want. Must be positive
+        privateServers.push(`pserv-${i}`);
+    }
+    return privateServers;
+}
+
+/**
+ * Checks if there are enough port openers available (from "home") to nuke the specified server.
+ * For servers named "pserv-0" to "pserv-24", this check is bypassed.
  *
  * @param {NS} ns 
  * @param {string} server - The server to check.
- * @returns {boolean} True if enough port openers are available; otherwise, false.
+ * @returns {boolean} True if the server can be nuked; otherwise, false.
  */
 function canNuke(ns, server) {
+    // Bypass check for private servers.
+    if (/^pserv-(\d+)$/.test(server)) {
+        const num = parseInt(server.split("-")[1]);
+        if (!isNaN(num) && num >= 0 && num <= 24) {
+            return true;
+        }
+    }
     let portsOpened = 0;
     if (ns.fileExists("BruteSSH.exe", "home")) portsOpened++;
     if (ns.fileExists("FTPCrack.exe", "home")) portsOpened++;
@@ -109,51 +145,45 @@ function canNuke(ns, server) {
 
 /**
  * Attempts to gain root access to a server and executes each script from scriptsToDeploy with the appropriate thread count.
- * This version first opens ports (if needed) and nukes the server.
+ * If a script with the same name is already running, it will be killed and restarted.
  *
  * @param {NS} ns
- * @param {string} server
- * @param {string[]} scriptsToDeploy
+ * @param {string} server - The target server.
+ * @param {string[]} scriptsToDeploy - The scripts to deploy.
  */
 function gainRootAccess(ns, server, scriptsToDeploy) {
     if (!ns.hasRootAccess(server)) {
         let portsOpened = 0;
-
-        if (ns.fileExists("BruteSSH.exe", "home")) {
-            ns.brutessh(server);
-            portsOpened++;
-        }
-        if (ns.fileExists("FTPCrack.exe", "home")) {
-            ns.ftpcrack(server);
-            portsOpened++;
-        }
-        if (ns.fileExists("relaySMTP.exe", "home")) {
-            ns.relaysmtp(server);
-            portsOpened++;
-        }
-        if (ns.fileExists("HTTPWorm.exe", "home")) {
-            ns.httpworm(server);
-            portsOpened++;
-        }
-        if (ns.fileExists("SQLInject.exe", "home")) {
-            ns.sqlinject(server);
-            portsOpened++;
-        }
-
+        if (ns.fileExists("BruteSSH.exe", "home")) { ns.brutessh(server); portsOpened++; }
+        if (ns.fileExists("FTPCrack.exe", "home")) { ns.ftpcrack(server); portsOpened++; }
+        if (ns.fileExists("relaySMTP.exe", "home")) { ns.relaysmtp(server); portsOpened++; }
+        if (ns.fileExists("HTTPWorm.exe", "home")) { ns.httpworm(server); portsOpened++; }
+        if (ns.fileExists("SQLInject.exe", "home")) { ns.sqlinject(server); portsOpened++; }
         const requiredPorts = ns.getServerNumPortsRequired(server);
         if (portsOpened >= requiredPorts) {
             ns.nuke(server);
         } else {
             ns.tprint(`ERROR: Not enough ports opened to nuke ${server} (${portsOpened}/${requiredPorts}).`);
-            return; // Skip this server if we can't gain root access.
+            return;
         }
     }
 
     if (ns.hasRootAccess(server)) {
         for (const script of scriptsToDeploy) {
+            // Kill the script if it's already running
+            if (ns.isRunning(script, server)) {
+                ns.kill(script, server);
+                ns.tprint(`Overwriting script: ${script} on ${server}.`);
+            }
+
+            // Deploy script with calculated thread count
             const threads = calculateThreads(ns, server, script);
-            ns.tprint(`Running ${script} on ${server} with ${threads} thread(s)...`);
-            ns.exec(script, server, threads);
+            if (threads > 0) {
+                ns.tprint(`Running ${script} on ${server} with ${threads} thread(s)...`);
+                ns.exec(script, server, threads);
+            } else {
+                ns.tprint(`Skipping ${script} on ${server} due to insufficient RAM.`);
+            }
         }
     } else {
         ns.tprint(`Failed to gain root access on ${server}.`);
@@ -161,56 +191,27 @@ function gainRootAccess(ns, server, scriptsToDeploy) {
 }
 
 /**
- * (Optional) Opens ports on a server using available hacking tools.
- * This function is kept here if you want to separate port opening logic later.
- *
- * @param {NS} ns
- * @param {string} server
- */
-function openPorts(ns, server) {
-    if (ns.fileExists("BruteSSH.exe", "home")) {
-        ns.brutessh(server);
-    }
-    if (ns.fileExists("FTPCrack.exe", "home")) {
-        ns.ftpcrack(server);
-    }
-    if (ns.fileExists("relaySMTP.exe", "home")) {
-        ns.relaysmtp(server);
-    }
-    if (ns.fileExists("HTTPWorm.exe", "home")) {
-        ns.httpworm(server);
-    }
-    if (ns.fileExists("SQLInject.exe", "home")) {
-        ns.sqlinject(server);
-    }
-}
-
-/**
- * Calculates the number of threads to use based on the server's maximum RAM and the script's RAM usage.
- * - Below 16GB: 1 thread
- * - Exactly 16GB: 6 threads
- * - Exactly 32GB: 12 threads
- * - Otherwise: uses available RAM divided by the script's RAM usage.
+ * Dynamically calculates the number of threads based on the server's available RAM and the script's RAM usage.
+ * Ensures at least 1 thread is used if there is some available RAM.
  *
  * @param {NS} ns
  * @param {string} server - The server hostname.
  * @param {string} script - The script filename.
- * @returns {number} The number of threads to use.
+ * @returns {number} The calculated thread count (minimum of 1 if RAM is available).
  */
 function calculateThreads(ns, server, script) {
     const maxRam = ns.getServerMaxRam(server);
-    if (maxRam < 16) {
+    const usedRam = ns.getServerUsedRam(server);
+    const availableRam = maxRam - usedRam;
+    const scriptRam = ns.getScriptRam(script, server);
+    
+    if (scriptRam <= 0) {
+        ns.tprint(`Warning: Script ${script} on ${server} has 0 RAM usage, defaulting thread count to 1.`);
         return 1;
-    } else if (maxRam === 16) {
-        return 6;
-    } else if (maxRam === 32) {
-        return 12;
-    } else {
-        const scriptRam = ns.getScriptRam(script, server);
-        if (scriptRam === 0) {
-            ns.tprint(`Warning: Script ${script} on ${server} has 0 RAM usage, defaulting thread count to 1.`);
-            return 1;
-        }
-        return Math.floor(maxRam / scriptRam);
     }
+
+    const threads = Math.floor(availableRam / scriptRam);
+
+    // Ensure at least 1 thread if any RAM is available
+    return threads > 0 ? threads : 1;
 }
