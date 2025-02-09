@@ -3,34 +3,66 @@
  */
 export async function main(ns) {
     // ====== CONFIGURATION ======
-    const scriptsToDeploy = ["earlyhack.js"];
-    // Manually excluded servers (these will never be processed)
-    const manualExcludedServers = [];
-    // Toggle to exclude private servers (pserv-0 to pserv-24)
-    const excludePrivateToggle = false;
-    // Build the full manual exclusion list:
-    let excludedServers = [...manualExcludedServers];
-    if (excludePrivateToggle) {
-        excludedServers.push(...generatePrivateServerList());
-    }
-    // ============================
+    // Default scripts to deploy if none are provided via the terminal.
+    const defaultScripts = ["hack.js"];
     
-    // Get the maximum hop level from the terminal argument (default: 1)
+    // Example usage:
+    //   run deploy.js 2 true "hack.js,grow.js"
+    // where:
+    //   ns.args[0] = maximum hop level (e.g., 2)
+    //   ns.args[1] = toggle for excluding private servers (e.g., true)
+    //   ns.args[2] = comma-separated list of scripts (e.g., "hack.js,grow.js")
+    
+    // Get the maximum hop level from argument 0 (default: 1)
     const targetHop = ns.args.length > 0 ? Number(ns.args[0]) : 1;
     if (isNaN(targetHop) || targetHop <= 0) {
         ns.tprint("ERROR: Invalid hop count. Please enter a positive number.");
         return;
     }
     
+    // Toggle for excluding private servers.
+    // If set to true, any server whose name starts with "pserv-" will be skipped.
+    const excludePrivateToggle = ns.args.length > 1 
+                                   ? (ns.args[1] === true || ns.args[1] === "true")
+                                   : false;
+    
+    // Allow the user to supply a comma-separated list of script names as the third argument.
+    // If not provided, use the default scripts.
+    const scriptsToDeploy = ns.args.length > 2 
+                              ? String(ns.args[2]).split(",").map(s => s.trim()).filter(s => s.length > 0)
+                              : defaultScripts;
+    // Manually excluded servers (these will never be processed)
+    const manualExcludedServers = [];
+    // ============================
+
+    ns.tprint(`Deploying scripts: ${scriptsToDeploy.join(", ")}`);
+    ns.tprint(`Maximum hop level: ${targetHop}`);
+    ns.tprint(`Exclude private servers: ${excludePrivateToggle}`);
+
     // Scan all servers up to targetHop from "home"
     const scannedServers = getServersUpToLevel(ns, targetHop);
+
+    // Determine which servers are manually excluded...
+    const manuallyExcluded = scannedServers.filter(server => manualExcludedServers.includes(server));
+    // ...and which servers are considered private (name starts with "pserv-")
+    const privateExcluded = excludePrivateToggle 
+                              ? scannedServers.filter(server => server.startsWith("pserv-"))
+                              : [];
     
-    // Compute the servers that are manually excluded
-    const manuallyExcluded = scannedServers.filter(server => excludedServers.includes(server));
-    // Compute candidate servers (those not manually excluded)
-    const candidateServers = scannedServers.filter(server => !excludedServers.includes(server));
-    
-    // Build an array of valid servers that can be nuked and an array of those that are skipped due to insufficient ports.
+    // Build candidate servers by excluding both manual and (if toggled) private servers.
+    const candidateServers = scannedServers.filter(server => {
+        if (manualExcludedServers.includes(server)) return false;
+        if (excludePrivateToggle && server.startsWith("pserv-")) return false;
+        return true;
+    });
+
+    // Print a summary of the excluded servers.
+    ns.tprint("============================================================");
+    ns.tprint(`Manually excluded servers: ${manuallyExcluded.length ? manuallyExcluded.join(", ") : "None"}`);
+    ns.tprint(`Private servers excluded: ${privateExcluded.length ? privateExcluded.join(", ") : "None"}`);
+    ns.tprint("============================================================");
+
+    // Build an array of valid servers that can be nuked and an array of those that are skipped due to insufficient port openers.
     let validServers = [];
     let portExcludedServers = [];
     for (const server of candidateServers) {
@@ -40,17 +72,6 @@ export async function main(ns) {
             continue;
         }
         validServers.push(server);
-    }
-    
-    // Print a summary of the excluded servers.
-    ns.tprint("============================================================");
-    ns.tprint(`Manually excluded servers: ${manuallyExcluded.length ? manuallyExcluded.join(", ") : "None"}`);
-    ns.tprint(`Servers skipped due to insufficient port openers: ${portExcludedServers.length ? portExcludedServers.join(", ") : "None"}`);
-    ns.tprint("============================================================");
-    
-    // Proceed with valid servers: copy scripts, then gain root and deploy.
-    for (const server of validServers) {
-        await ns.scp(scriptsToDeploy, server);
     }
     
     // (Optional) Separate valid servers based on port requirements (for logging)
@@ -67,7 +88,11 @@ export async function main(ns) {
     ns.tprint(`Valid servers (up to ${targetHop} hops) requiring no ports: ${serversNoPorts.join(", ")}`);
     ns.tprint(`Valid servers (up to ${targetHop} hops) requiring ports: ${serversWithPorts.join(", ")}`);
     
-    // Deploy scripts on valid servers.
+    // Proceed: copy scripts, gain root access and deploy.
+    for (const server of validServers) {
+        await ns.scp(scriptsToDeploy, server);
+    }
+    
     for (const server of validServers) {
         gainRootAccess(ns, server, scriptsToDeploy);
     }
@@ -105,21 +130,8 @@ function getServersUpToLevel(ns, maxHop) {
 }
 
 /**
- * Generates a list of private server names from pserv-0 to pserv-24.
- *
- * @returns {string[]} Array of private server names.
- */
-function generatePrivateServerList() {
-    let privateServers = [];
-    for (let i = 0; i <= 24; i++) { // Change the number 24 to whatever you want. Must be positive
-        privateServers.push(`pserv-${i}`);
-    }
-    return privateServers;
-}
-
-/**
  * Checks if there are enough port openers available (from "home") to nuke the specified server.
- * For servers named "pserv-0" to "pserv-24", this check is bypassed.
+ * For private servers (names starting with "pserv-"), this check is bypassed.
  *
  * @param {NS} ns 
  * @param {string} server - The server to check.
@@ -127,11 +139,8 @@ function generatePrivateServerList() {
  */
 function canNuke(ns, server) {
     // Bypass check for private servers.
-    if (/^pserv-(\d+)$/.test(server)) {
-        const num = parseInt(server.split("-")[1]);
-        if (!isNaN(num) && num >= 0 && num <= 24) {
-            return true;
-        }
+    if (server.startsWith("pserv-")) {
+        return true;
     }
     let portsOpened = 0;
     if (ns.fileExists("BruteSSH.exe", "home")) portsOpened++;
@@ -167,7 +176,6 @@ function gainRootAccess(ns, server, scriptsToDeploy) {
             return;
         }
     }
-
     if (ns.hasRootAccess(server)) {
         for (const script of scriptsToDeploy) {
             // Kill the script if it's already running
@@ -175,7 +183,6 @@ function gainRootAccess(ns, server, scriptsToDeploy) {
                 ns.kill(script, server);
                 ns.tprint(`Overwriting script: ${script} on ${server}.`);
             }
-
             // Deploy script with calculated thread count
             const threads = calculateThreads(ns, server, script);
             if (threads > 0) {
@@ -192,7 +199,7 @@ function gainRootAccess(ns, server, scriptsToDeploy) {
 
 /**
  * Dynamically calculates the number of threads based on the server's available RAM and the script's RAM usage.
- * Ensures at least 1 thread is used if there is some available RAM.
+ * Available RAM is calculated as (maxRam - usedRam). Ensures at least 1 thread if RAM is available.
  *
  * @param {NS} ns
  * @param {string} server - The server hostname.
@@ -209,9 +216,7 @@ function calculateThreads(ns, server, script) {
         ns.tprint(`Warning: Script ${script} on ${server} has 0 RAM usage, defaulting thread count to 1.`);
         return 1;
     }
-
+    
     const threads = Math.floor(availableRam / scriptRam);
-
-    // Ensure at least 1 thread if any RAM is available
     return threads > 0 ? threads : 1;
 }
