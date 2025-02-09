@@ -2,9 +2,9 @@
 Newbie Script for Bitburner
 
 # What is it?
-advancedstart.js - This script automates the process of deploying a set of hacking scripts to every server on your network (except for servers you want to exclude, such as "home").
+deploy.js - This script automates the process of deploying a set of hacking scripts to every server on your network, I implemented an exclusion server, maximum hops that you can adjust, and server filtering before copying scripts to the following servers.
 
-remove.js - This script is designed to clean up your network by stopping and removing specific script files from every server (except those you want to keep intact).
+remove.js - This script is designed to clean up your network by stopping and removing specific script files from every server, I implemented the same system as in deploy.js (without the server filtering).
 
 # Disclaimer
 
