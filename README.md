@@ -13,13 +13,21 @@ It will print out some information.
 serverinfo.js - This script scans servers at specific "hop" levels from "home" and prints detailed information. (Specific means only 1 "hop" will be scanned, but you can insert 2 or more "hops")
 
 # Usage
-run deploy.js [maxHop] [excludePrivate]
+run deploy.js [maxHop] [excludePrivate] [scriptname]
 
-run remove.js [maxHop] [excludePrivate]
+run remove.js [maxHop] [excludePrivate] [scriptname]
 
 run serverinfo.js [hops] [excludePrivateServers]
 
 # Exclusive Example
+run deploy.js 1 false hack.js
+
+run deploy.js 1 false hack.js,grow.js
+
+run remove.js 1 false hack.js
+
+run remove.js 1 false hack.js,grow.js
+
 run serverinfo.js 1 true
 
 run serverinfo.js 2,4 true
