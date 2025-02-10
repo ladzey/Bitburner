@@ -1,23 +1,28 @@
 /** 
  * This script scans servers at specific hop levels from "home" and prints detailed information.
+ * When scanning for a specific server (by providing it as the second argument), the script
+ * also prints the node path from "home" to that server after printing the excluded servers summary.
  * 
  * Usage: run serverinfo.js [hops] [targetServer]
  * 
  * Examples:
  *   run serverinfo.js 2,4         (scans only hops 2 and 4 using the internal private server exclusion setting)
- *   run serverinfo.js 1, myserver  (scans only hops 1 and then prints info for the specific server "myserver")
+ *   run serverinfo.js 1, myserver  (scans only hop 1 and then prints info for the specific server "myserver",
+ *                                  along with its node path)
  * 
  * @param {NS} ns 
  */
 export async function main(ns) {
     // ====== CONFIGURATION ======
-    const defaultHops = [1]; // Default specific hops if none provided
-    const excludePrivateServers = true;  // Toggle private server exclusion (set inside the script)
-    const manualExcludedServers = [];    // Add any other servers you want to exclude
-    // ===========================
+    const defaultHops = [1];              // Default specific hops if none provided
+    const excludePrivateServers = true;   // Toggle private server exclusion (set inside the script)
+    const manualExcludedServers = [];     // Add any other servers you want to exclude
+    // ============================
 
     // Parse hops argument (comma-separated list)
-    const hops = ns.args.length > 0 ? String(ns.args[0]).split(",").map(Number).filter(n => !isNaN(n) && n > 0) : defaultHops;
+    const hops = ns.args.length > 0 
+                   ? String(ns.args[0]).split(",").map(Number).filter(n => !isNaN(n) && n > 0) 
+                   : defaultHops;
     if (hops.length === 0) {
         ns.tprint("ERROR: Invalid hops. Please enter a comma-separated list of positive numbers.");
         return;
@@ -32,6 +37,7 @@ export async function main(ns) {
         excludedServers.push(...generatePrivateServerList());
     }
 
+    // Build the list of servers to process.
     let servers = [];
     if (targetServer !== "") {
         ns.tprint(`Scanning specific server: ${targetServer}`);
@@ -50,7 +56,18 @@ export async function main(ns) {
     ns.tprint(`Excluded servers: ${excludedServers.length > 0 ? excludedServers.join(", ") : "None"}`);
     ns.tprint("============================================================");
 
-    // Print server info
+    // If scanning a specific server, now print its node path from "home"
+    if (targetServer !== "") {
+        const nodePath = getPathToServer(ns, targetServer);
+        if (nodePath.length > 0) {
+            ns.tprint(`Node Path: ${nodePath.join(" -> ")}`);
+        } else {
+            ns.tprint(`Node Path not found for ${targetServer}.`);
+        }
+        ns.tprint("============================================================");
+    }
+
+    // Print server info for each server in the final list
     for (const server of servers) {
         printServerInfo(ns, server);
         ns.tprint("------------------------------------------------------------");
@@ -99,6 +116,33 @@ function generatePrivateServerList() {
         privateServers.push(`pserv-${i}`);
     }
     return privateServers;
+}
+
+/**
+ * Returns the node path (as an array of server names) from "home" to the target server using BFS.
+ * 
+ * @param {NS} ns
+ * @param {string} target - The target server name.
+ * @returns {string[]} The node path from "home" to target, or an empty array if not found.
+ */
+function getPathToServer(ns, target) {
+    const visited = new Set();
+    const queue = [{ server: "home", path: ["home"] }];
+    visited.add("home");
+
+    while (queue.length > 0) {
+        const { server, path } = queue.shift();
+        if (server === target) {
+            return path;
+        }
+        for (const neighbor of ns.scan(server)) {
+            if (!visited.has(neighbor)) {
+                visited.add(neighbor);
+                queue.push({ server: neighbor, path: [...path, neighbor] });
+            }
+        }
+    }
+    return [];
 }
 
 /**
