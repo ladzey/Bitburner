@@ -17,7 +17,7 @@ run deploy.js [maxHop] [excludePrivate] [scriptname]
 
 run remove.js [maxHop] [excludePrivate] [scriptname]
 
-run serverinfo.js [hops] [excludePrivateServers]
+run serverinfo.js [hops] [targetServer]
 
 # Exclusive Example
 run deploy.js 1 false hack.js
@@ -28,11 +28,9 @@ run remove.js 1 false hack.js
 
 run remove.js 1 false hack.js,grow.js
 
-run serverinfo.js 1 true
+run serverinfo.js 1 n00dles
 
-run serverinfo.js 2,4 true
-
-run serverinfo.js 3,1 false
+run serverinfo.js 2,4
 
 # Disclaimer
 
