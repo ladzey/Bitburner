@@ -1,17 +1,19 @@
 /** 
  * @param {NS} ns 
+ *
+ * Usage:
+ *   run deploy.js 2 "hack.js,grow.js" true "n00dles"
+ *
+ * where:
+ *   ns.args[0] = maximum hop level (e.g., 2)
+ *   ns.args[1] = comma-separated list of scripts (e.g., "hack.js,grow.js")
+ *   ns.args[2] = toggle for excluding private servers (true/false)
+ *   ns.args[3] = [optional] target for the deployed scripts (e.g., "n00dles")
  */
 export async function main(ns) {
     // ====== CONFIGURATION ======
     // Default scripts to deploy if none are provided via the terminal.
     const defaultScripts = ["hack.js"];
-    
-    // Example usage:
-    //   run deploy.js 2 "hack.js,grow.js" true
-    // where:
-    //   ns.args[0] = maximum hop level (e.g., 2)
-    //   ns.args[1] = comma-separated list of scripts (e.g., "hack.js,grow.js")
-    //   ns.args[2] = toggle for excluding private servers (e.g., true)
     
     // Get the maximum hop level from argument 0 (default: 1)
     const targetHop = ns.args.length > 0 ? Number(ns.args[0]) : 1;
@@ -27,11 +29,15 @@ export async function main(ns) {
                               : defaultScripts;
     
     // Toggle for excluding private servers.
-    // If set to true, any server whose name starts with "pserv-" will be skipped.
-    // Default: false
-    const excludePrivateToggle = ns.args.length > 2 
-                                   ? (ns.args[2] === true || ns.args[2] === "true")
-                                   : false;
+    // If true, any server whose name starts with "pserv-" will be skipped.
+    // This value is provided as the third argument.
+    const EXCLUDE_PRIVATE_SERVERS = ns.args.length > 2 
+                                      ? (ns.args[2] === true || ns.args[2] === "true")
+                                      : false;
+    
+    // Allow an optional target for the deployed scripts (the hacking target).
+    // If not provided, hackTarget will be undefined.
+    const hackTarget = ns.args.length > 3 && ns.args[3] ? ns.args[3] : undefined;
     
     // Manually excluded servers (these will never be processed)
     const manualExcludedServers = [];
@@ -39,7 +45,8 @@ export async function main(ns) {
 
     ns.tprint(`Deploying scripts: ${scriptsToDeploy.join(", ")}`);
     ns.tprint(`Maximum hop level: ${targetHop}`);
-    ns.tprint(`Exclude private servers toggle: ${excludePrivateToggle}`);
+    ns.tprint(`Exclude private servers: ${EXCLUDE_PRIVATE_SERVERS}`);
+    ns.tprint(`Hack target: ${hackTarget ? hackTarget : "None specified"}`);
 
     // Scan all servers up to targetHop from "home"
     const scannedServers = getServersUpToLevel(ns, targetHop);
@@ -47,14 +54,14 @@ export async function main(ns) {
     // Determine which servers are manually excluded...
     const manuallyExcluded = scannedServers.filter(server => manualExcludedServers.includes(server));
     // ...and which servers are considered private (name starts with "pserv-")
-    const privateExcluded = excludePrivateToggle 
+    const privateExcluded = EXCLUDE_PRIVATE_SERVERS 
                               ? scannedServers.filter(server => server.startsWith("pserv-"))
                               : [];
     
     // Build candidate servers by excluding both manual and (if toggled) private servers.
     const candidateServers = scannedServers.filter(server => {
         if (manualExcludedServers.includes(server)) return false;
-        if (excludePrivateToggle && server.startsWith("pserv-")) return false;
+        if (EXCLUDE_PRIVATE_SERVERS && server.startsWith("pserv-")) return false;
         return true;
     });
 
@@ -100,8 +107,9 @@ export async function main(ns) {
         await ns.scp(scriptsToDeploy, server);
     }
     
+    // Pass the hackTarget to gainRootAccess so that each deployed script receives it (if provided).
     for (const server of validServers) {
-        gainRootAccess(ns, server, scriptsToDeploy);
+        await gainRootAccess(ns, server, scriptsToDeploy, hackTarget);
     }
 }
 
@@ -161,13 +169,16 @@ function canNuke(ns, server) {
 
 /**
  * Attempts to gain root access to a server and executes each script from scriptsToDeploy with the appropriate thread count.
- * If a script with the same name is already running, it will be killed and restarted.
+ * If a script with the same name is already running, it will be killed (even if running with arguments) and restarted.
+ * 
+ * Now includes the hackTarget parameter, which is optionally passed to each deployed script.
  *
  * @param {NS} ns
  * @param {string} server - The target server.
  * @param {string[]} scriptsToDeploy - The scripts to deploy.
+ * @param {string} [hackTarget] - The optional target argument to pass to each script.
  */
-function gainRootAccess(ns, server, scriptsToDeploy) {
+async function gainRootAccess(ns, server, scriptsToDeploy, hackTarget) {
     if (!ns.hasRootAccess(server)) {
         let portsOpened = 0;
         if (ns.fileExists("BruteSSH.exe", "home")) { ns.brutessh(server); portsOpened++; }
@@ -185,16 +196,31 @@ function gainRootAccess(ns, server, scriptsToDeploy) {
     }
     if (ns.hasRootAccess(server)) {
         for (const script of scriptsToDeploy) {
-            // Kill the script if it's already running
-            if (ns.isRunning(script, server)) {
-                ns.kill(script, server);
-                ns.tprint(`Overwriting script: ${script} on ${server}.`);
+            // Retrieve all running processes on the server.
+            const processes = ns.ps(server);
+            let foundProcess = false;
+            for (const proc of processes) {
+                if (proc.filename === script) {
+                    ns.tprint(`Killing ${script} on ${server} (PID: ${proc.pid}, Args: ${proc.args.join(" ")})`);
+                    // Kill the process using its original arguments.
+                    ns.kill(script, server, ...proc.args);
+                    foundProcess = true;
+                }
             }
-            // Deploy script with calculated thread count
+            // Allow a brief moment for the kill commands to take effect.
+            if (foundProcess) {
+                await ns.sleep(100);
+            }
+            // Deploy script with calculated thread count.
             const threads = calculateThreads(ns, server, script);
             if (threads > 0) {
                 ns.tprint(`Running ${script} on ${server} with ${threads} thread(s)...`);
-                ns.exec(script, server, threads);
+                // If a hackTarget was provided, pass it along; otherwise, deploy without extra arguments.
+                if (hackTarget !== undefined) {
+                    ns.exec(script, server, threads, hackTarget);
+                } else {
+                    ns.exec(script, server, threads);
+                }
             } else {
                 ns.tprint(`Skipping ${script} on ${server} due to insufficient RAM.`);
             }
