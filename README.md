@@ -3,7 +3,7 @@ Newbie Script for Bitburner
 
 # What is it?
 deploy.js - This script allows you to copy and run specified scripts in all the servers if the server already has the same name scripts it will overwrite the scripts. 
-It will even print out some information. For more flexibility, I added a target for the deployed scripts.
+It will even print out some information.
 (You can configure the settings to your liking. Like what scripts you want to deploy, manually exclude servers, toggle excluding private servers, and set maximum "hops").
 
 remove.js - This script allows you to stop and remove specified scripts in all the servers. 
@@ -14,7 +14,7 @@ serverinfo.js - This script scans servers at specific "hop" levels from "home" a
 (Specific means only 1 "hop" will be scanned, but you can insert 2 "hops")
 
 # Usage
-run deploy.js [maxHop] [scriptname] [excludePrivate] [target]
+run deploy.js [maxHop] [scriptname] [excludePrivate]
 
 run remove.js [maxHop] [scriptname] [excludePrivate]
 
@@ -23,7 +23,7 @@ run serverinfo.js [hops] [targetServer]
 # Exclusive Example
 run deploy.js 2 "hack.js" false
 
-run deploy.js 2 "hack.js,grow.js" true "n00dles"
+run deploy.js 2 "hack.js,grow.js" true
 
 run remove.js 2 "hack.js" true
 
