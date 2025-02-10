@@ -1,16 +1,16 @@
 /** 
  * This script stops and removes specific scripts from servers within a specified hop range.
  *
- * Usage: run remove.js [maxHop] [excludePrivate] [scriptsToRemove]
+ * Usage: run remove.js [maxHop] [scriptsToRemove] [excludePrivate]
  *   - maxHop: The maximum hop level (distance from "home"). (Default: 1)
- *   - excludePrivate: Toggle to exclude private servers (if "true", excludes any server starting with "pserv"). (Default: false)
  *   - scriptsToRemove: A comma-separated list of script filenames to remove. (Default: "hack.js")
+ *   - excludePrivate: Toggle to exclude private servers (if "true", excludes any server starting with "pserv"). (Default: false)
  *
- * Example: run remove.js 2 true "hack.js,grow.js"
+ * Example: run remove.js 2 "hack.js,grow.js" true
  *
  * It will:
  *   1. Retrieve all servers within the specified number of hops from "home".
- *   2. Optionally exclude all private servers (any server whose name starts with "pserv").
+ *   2. Optionally exclude all private servers (any server whose name starts with "pserv") if the toggle is set.
  *   3. Skip any server specified in the manual exclusion list.
  *   4. For each remaining server, check if any file matches one of the target scripts.
  *   5. Attempt to kill the script if it's running on that server.
@@ -22,25 +22,7 @@ export async function main(ns) {
     // ====== CONFIGURATION ======
     // Default list of scripts to remove if none are provided via the terminal.
     const defaultScripts = ["hack.js"];
-    // Allow the user to supply a comma-separated list of script names as the third argument.
-    // Example: run remove.js 2 true "hack.js,grow.js"
-    const scriptsToRemove = ns.args.length > 2 
-                              ? String(ns.args[2]).split(",").map(s => s.trim()).filter(s => s.length > 0)
-                              : defaultScripts;
-
-    // Manually excluded servers (these will never be processed)
-    const manualExcludedServers = [];
-
-    // Toggle to exclude private servers is set via the second argument.
-    // Convert the argument to a boolean (if provided); default is false.
-    const excludePrivate = ns.args.length > 1 
-                              ? String(ns.args[1]).toLowerCase() === "true" 
-                              : false;
-    // Build the full manual exclusion list:
-    let excludedServers = [...manualExcludedServers];
-    // (No need to add a fixed list here since our getServersUpToLevel() will handle private servers if toggle is true.)
-    // ============================
-
+    
     // Get the maximum hop level from the terminal argument (first argument). Default: 1
     const targetHop = ns.args.length > 0 ? Number(ns.args[0]) : 1;
     if (isNaN(targetHop) || targetHop <= 0) {
@@ -48,6 +30,25 @@ export async function main(ns) {
         return;
     }
     
+    // Allow the user to supply a comma-separated list of script names as the second argument.
+    // If not provided, use the default scripts.
+    const scriptsToRemove = ns.args.length > 1 
+                              ? String(ns.args[1]).split(",").map(s => s.trim()).filter(s => s.length > 0)
+                              : defaultScripts;
+    
+    // Toggle to exclude private servers is now provided as the third argument.
+    // Convert the argument to a boolean (if provided); default is false.
+    const excludePrivate = ns.args.length > 2 
+                              ? String(ns.args[2]).toLowerCase() === "true" 
+                              : false;
+    
+    // Manually excluded servers (these will never be processed)
+    const manualExcludedServers = [];
+    
+    // Build the full manual exclusion list (if any).
+    let excludedServers = [...manualExcludedServers];
+    // ============================
+
     ns.tprint(`Removing scripts: ${scriptsToRemove.join(", ")}`);
     ns.tprint(`Maximum hop level: ${targetHop}`);
     ns.tprint(`Exclude private servers: ${excludePrivate}`);
