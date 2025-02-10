@@ -1,18 +1,19 @@
 /** 
  * This script scans servers at specific hop levels from "home" and prints detailed information.
  * 
- * Usage: run serverinfo.js [hops] [excludePrivateServers]
- * Example: run serverinfo.js 2,4 true  (scans only hops 2 and 4, excludes private servers)
- * Example: run serverinfo.js 1,3 false (scans only hops 1 and 3, includes private servers)
- * Example: run serverinfo.js 1 true/false (scans only hops 1, includes/excludes private servers)
+ * Usage: run serverinfo.js [hops] [targetServer]
+ * 
+ * Examples:
+ *   run serverinfo.js 2,4         (scans only hops 2 and 4 using the internal private server exclusion setting)
+ *   run serverinfo.js 1, myserver  (scans only hops 1 and then prints info for the specific server "myserver")
  * 
  * @param {NS} ns 
  */
 export async function main(ns) {
     // ====== CONFIGURATION ======
     const defaultHops = [1]; // Default specific hops if none provided
-    const excludePrivateServers = ns.args.length > 1 ? ns.args[1] === "true" : true; // Toggle private server exclusion
-    const manualExcludedServers = []; // Add any other servers you want to exclude
+    const excludePrivateServers = true;  // Toggle private server exclusion (set inside the script)
+    const manualExcludedServers = [];    // Add any other servers you want to exclude
     // ===========================
 
     // Parse hops argument (comma-separated list)
@@ -22,17 +23,29 @@ export async function main(ns) {
         return;
     }
 
-    // Generate excluded servers list
+    // Optional: if provided as the second argument, scan this specific server.
+    const targetServer = ns.args.length > 1 ? String(ns.args[1]).trim() : "";
+
+    // Generate the list of excluded servers.
     let excludedServers = [...manualExcludedServers];
     if (excludePrivateServers) {
         excludedServers.push(...generatePrivateServerList());
     }
 
-    // Get servers at specified hops
-    let servers = getServersAtHops(ns, hops);
-    servers = servers.filter(server => !excludedServers.includes(server)); // Remove excluded servers
+    let servers = [];
+    if (targetServer !== "") {
+        ns.tprint(`Scanning specific server: ${targetServer}`);
+        servers.push(targetServer);
+    } else {
+        ns.tprint(`Scanning servers at hops: ${hops.join(", ")}`);
+        servers = getServersAtHops(ns, hops);
+    }
 
-    ns.tprint(`Scanning servers at hops: ${hops.join(", ")}`);
+    // Remove excluded servers (if scanning by hops).
+    if (targetServer === "") {
+        servers = servers.filter(server => !excludedServers.includes(server));
+    }
+
     ns.tprint(`Excluding private servers: ${excludePrivateServers}`);
     ns.tprint(`Excluded servers: ${excludedServers.length > 0 ? excludedServers.join(", ") : "None"}`);
     ns.tprint("============================================================");
@@ -82,7 +95,7 @@ function getServersAtHops(ns, targetHops) {
  */
 function generatePrivateServerList() {
     let privateServers = [];
-    for (let i = 0; i <= 24; i++) { // Change the number 24 to whatever you want. Must be positive
+    for (let i = 0; i <= 24; i++) {
         privateServers.push(`pserv-${i}`);
     }
     return privateServers;
