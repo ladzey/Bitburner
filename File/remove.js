@@ -13,7 +13,7 @@
  *   2. Optionally exclude all private servers (any server whose name starts with "pserv") if the toggle is set.
  *   3. Skip any server specified in the manual exclusion list.
  *   4. For each remaining server, check if any file matches one of the target scripts.
- *   5. Attempt to kill the script if it's running on that server.
+ *   5. Attempt to kill the script if it's running on that server (including any with arguments attached).
  *   6. Remove the file from the server.
  *
  * @param {NS} ns
@@ -75,14 +75,30 @@ export async function main(ns) {
         // Loop through each file and, if it matches one of the target scripts, kill and remove it.
         for (const file of files) {
             if (scriptsToRemove.includes(file)) {
-                // Attempt to kill the script if it is running.
-                ns.kill(file, server);
-                ns.tprint(`Attempted to stop ${file} on ${server}.`);
-                // Optionally wait a short moment to let the kill take effect.
-                await ns.sleep(100);
+                ns.tprint(`Found ${file} on ${server}.`);
+
+                // Retrieve all running processes on the server.
+                const processes = ns.ps(server);
+                let foundRunning = false;
+                for (const proc of processes) {
+                    // If this process is running the target file...
+                    if (proc.filename === file) {
+                        ns.tprint(`Killing ${file} on ${server} (PID: ${proc.pid}, Args: ${proc.args}).`);
+                        // Kill the process using its original arguments.
+                        ns.kill(file, server, ...proc.args);
+                        foundRunning = true;
+                    }
+                }
+                // Allow a brief moment for the kill commands to take effect.
+                if (foundRunning) {
+                    await ns.sleep(100);
+                }
                 // Remove the file from the server.
-                ns.rm(file, server);
-                ns.tprint(`Removed ${file} from ${server}.`);
+                if (ns.rm(file, server)) {
+                    ns.tprint(`Removed ${file} from ${server}.`);
+                } else {
+                    ns.tprint(`Failed to remove ${file} from ${server}.`);
+                }
             }
         }
     }
