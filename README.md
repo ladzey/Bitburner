@@ -10,7 +10,8 @@ remove.js - This script allows you to stop and remove specified scripts in all t
 It will print out some information. 
 (You can configure the settings to your liking. Like what scripts you want to remove, manually exclude servers, toggle excluding private servers, and set maximum "hops").
 
-serverinfo.js - This script scans servers at specific "hop" levels from "home" and prints detailed information. (Specific means only 1 "hop" will be scanned, but you can insert 2 or more "hops")
+serverinfo.js - This script scans servers at specific "hop" levels from "home" and prints detailed information. It also can scan for specific servers.
+(Specific means only 1 "hop" will be scanned, but you can insert 2 or more "hops")
 
 # Usage
 run deploy.js [maxHop] [excludePrivate] [scriptname]
